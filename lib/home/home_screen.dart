@@ -108,31 +108,11 @@ class _HomeScreenState extends State<HomeScreen>
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        title: Row(
-          children: [
-            Text('Todo',
-                style: TextStyle(
-                    color: Colors.black,
-                    fontSize: 18.sp,
-                    fontWeight: FontWeight.w600)),
-            SizedBox(
-              width: 10.w,
-            ),
-            InkWell(
-                child: Icon(
-                  Icons.alarm,
-                  color: Palette.theme,
-                ),
-                onTap: () {
-                  NotificationApi.showNotification(
-                      id: 0,
-                      title: 'Todo',
-                      body: 'Hello',
-                      payload: 'payload',
-                      dt: DateTime.now().add(Duration(seconds: 2)));
-                })
-          ],
-        ),
+        title: Text('Todo',
+            style: TextStyle(
+                color: Colors.black,
+                fontSize: 18.sp,
+                fontWeight: FontWeight.w600)),
         toolbarHeight: 70.w,
         elevation: 0,
         backgroundColor: Colors.white,
