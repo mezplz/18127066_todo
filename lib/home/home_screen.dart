@@ -1,13 +1,18 @@
+// ignore_for_file: prefer_const_constructors, prefer_const_literals_to_create_immutables
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:todo/notifications/notification_api.dart';
 import 'package:todo/todo/screens/add_todo_screen.dart';
-import 'package:todo/todo/screens/todo_list_screen.dart';
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest.dart' as tz;
 
 import '../config/pallete.dart';
 import '../todo/models/todo.dart';
+import '../todo/widgets/todo_tile.dart';
 import 'model/tab.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -23,31 +28,40 @@ class _HomeScreenState extends State<HomeScreen>
   List<Todo> todo = [];
   final TextEditingController searchController = TextEditingController();
   String search = '';
-  // late SharedPreferences prefs;
-  // setupTodo() async {
-  //   prefs = await SharedPreferences.getInstance();
-  //   String? stringTodo = prefs.getString('todo');
-  //   List todoList = jsonDecode(stringTodo!);
-  //   for (var todo in todoList) {
-  //     setState(() {
-  //       todo.add(Todo(id: 0, title: '', date: '', time: '', status: false)
-  //           .fromJson(todo));
-  //     });
-  //   }
-  // }
+  late SharedPreferences prefs;
+  setupTodo() async {
+    prefs = await SharedPreferences.getInstance();
+    String stringTodo = prefs.getString('todo') ?? '';
+    if (stringTodo.isNotEmpty) {
+      List todoList = jsonDecode(stringTodo);
+      for (var t in todoList) {
+        setState(() {
+          todo.add(Todo(id: 0, title: '', date: '', time: '', status: false)
+              .fromJson(t));
+        });
+      }
+    }
+  }
 
-  //  void saveTodo() {
-  //   List items = todo.map((e) => e.toJson()).toList();
-  //   prefs.setString('todo', jsonEncode(items));
-  // }
+  void saveTodo() {
+    List items = todo.map((e) => e.toJson()).toList();
+    prefs.setString('todo', jsonEncode(items));
+  }
 
   @override
   void initState() {
     super.initState();
     _controller = TabController(length: tabs.length, vsync: this);
     _controller.addListener(_handleTabSelection);
-    // setupTodo();
+    setupTodo();
+
+    NotificationApi.init();
+    tz.initializeTimeZones();
+    setNotifications(todo);
+    // listenNotifications();
   }
+
+  // void listenNotifications() => NotificationApi.onNotifications.stream.listen(onClickedNotification);
 
   void _handleTabSelection() {
     setState(() {});
@@ -59,16 +73,66 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
+  void setNotifications(List<Todo> todos) {
+    NotificationApi.cancelAllNotifications();
+    if (todos.isNotEmpty) {
+      for (var t in todos) {
+        var date = t.date.split('/');
+        var time = t.time.split(':');
+        int day = int.parse(date[0]);
+        int month = int.parse(date[1]);
+        int year = int.parse(date[2]);
+        int hour = int.parse(time[0]);
+        int min = int.parse(time[1]);
+        DateTime dt = DateTime(year, month, day, hour, min);
+        if (dt.isAfter(DateTime.now()) &&
+            dt.difference(DateTime.now()).inMinutes >= 10) {
+          NotificationApi.showNotification(
+              id: t.id,
+              title: t.title,
+              body: t.date + ' ' + t.time,
+              payload: 'payload',
+              dt: dt.subtract(Duration(minutes: 10)));
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final types = [
+      0,
+      1,
+      2,
+    ];
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        title: Text('Todo',
-            style: TextStyle(
-                color: Colors.black,
-                fontSize: 18.sp,
-                fontWeight: FontWeight.w600)),
+        title: Row(
+          children: [
+            Text('Todo',
+                style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 18.sp,
+                    fontWeight: FontWeight.w600)),
+            SizedBox(
+              width: 10.w,
+            ),
+            InkWell(
+                child: Icon(
+                  Icons.alarm,
+                  color: Palette.theme,
+                ),
+                onTap: () {
+                  NotificationApi.showNotification(
+                      id: 0,
+                      title: 'Todo',
+                      body: 'Hello',
+                      payload: 'payload',
+                      dt: DateTime.now().add(Duration(seconds: 2)));
+                })
+          ],
+        ),
         toolbarHeight: 70.w,
         elevation: 0,
         backgroundColor: Colors.white,
@@ -165,21 +229,61 @@ class _HomeScreenState extends State<HomeScreen>
           controller: _controller,
           physics: const NeverScrollableScrollPhysics(),
           children: [
-            TodoListScreen(
-              todo: todo,
-              search: search,
-              type: 0,
-            ),
-            TodoListScreen(
-              todo: todo,
-              search: search,
-              type: 1,
-            ),
-            TodoListScreen(
-              todo: todo,
-              search: search,
-              type: 2,
-            ),
+            for (var type in types)
+              Container(
+                  color: Colors.white,
+                  child: ListView.builder(
+                    itemCount: todo.length,
+                    physics: ClampingScrollPhysics(),
+                    itemBuilder: ((context, index) {
+                      final item = todo[index];
+                      return Dismissible(
+                        key: Key(item.id.toString()),
+                        onDismissed: (direction) {
+                          // Remove the item from the data source.
+                          setState(() {
+                            todo.removeAt(index);
+                          });
+                          saveTodo();
+                          setNotifications(todo);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Todo removed')));
+                        },
+                        background: Container(
+                          color: Colors.red,
+                          child: Center(
+                            child: Text(
+                              'Remove',
+                              style: TextStyle(
+                                  color: Colors.white, fontSize: 15.sp),
+                            ),
+                          ),
+                        ),
+                        child: InkWell(
+                            onTap: () {
+                              setState(() {
+                                todo[index].status = !todo[index].status;
+                              });
+                              saveTodo();
+                            },
+                            child: type == 0
+                                ? isSearch(todo[index].title, search)
+                                    ? TodoTile(todo: todo[index])
+                                    : SizedBox.shrink()
+                                : type == 1
+                                    ? isToday(todo[index])
+                                        ? isSearch(todo[index].title, search)
+                                            ? TodoTile(todo: todo[index])
+                                            : SizedBox.shrink()
+                                        : SizedBox.shrink()
+                                    : isUpcomming(todo[index])
+                                        ? isSearch(todo[index].title, search)
+                                            ? TodoTile(todo: todo[index])
+                                            : SizedBox.shrink()
+                                        : SizedBox.shrink()),
+                      );
+                    }),
+                  )),
           ],
         ),
       ),
@@ -187,6 +291,7 @@ class _HomeScreenState extends State<HomeScreen>
         backgroundColor: Palette.theme,
         onPressed: () {
           addTodo();
+          // setNotifications(todo);
         },
         child: Icon(
           Icons.add,
@@ -199,13 +304,52 @@ class _HomeScreenState extends State<HomeScreen>
   addTodo() async {
     int id = todo.isEmpty ? 0 : todo.last.id + 1;
     Todo t = Todo(id: id, title: '', date: '', time: '', status: false);
-    Todo returnTodo = await Navigator.push(context,
+    Todo? returnTodo = await Navigator.push(context,
         MaterialPageRoute(builder: (context) => AddTodoScreen(todo: t)));
     if (returnTodo != null) {
       setState(() {
         todo.add(returnTodo);
       });
-      // saveTodo();
+      saveTodo();
+      setNotifications(todo);
+    }
+  }
+
+  bool isSearch(String title, String search) {
+    if (title.toLowerCase().contains(search.toLowerCase())) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  bool isToday(Todo todo) {
+    DateTime now = DateTime.now();
+    var d = todo.date.split('/');
+    int _day = int.parse(d[0]);
+    int _month = int.parse(d[1]);
+    int _year = int.parse(d[2]);
+    DateTime date = DateTime(_year, _month, _day, now.hour, now.minute,
+        now.second, now.millisecond, now.microsecond);
+    if (date.isAtSameMomentAs(now)) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  bool isUpcomming(Todo todo) {
+    DateTime now = DateTime.now();
+    var d = todo.date.split('/');
+    int _day = int.parse(d[0]);
+    int _month = int.parse(d[1]);
+    int _year = int.parse(d[2]);
+    DateTime date = DateTime(_year, _month, _day, now.hour, now.minute,
+        now.second, now.millisecond, now.microsecond);
+    if (date.isAfter(now)) {
+      return true;
+    } else {
+      return false;
     }
   }
 }
